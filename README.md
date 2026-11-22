@@ -174,6 +174,8 @@ release builds. See the [full compatibility table](docs/SETUP.md#what-works-wher
 | [Appearance](docs/APPEARANCE.md) | Fonts, surfaces, presets, inheritance and live preview |
 | [Control Deck](docs/CONTROL-DECK.md) | Audio, media, OBS, shortcuts, tasks, protocols, dependencies and platform limits |
 | [Discord widget](docs/DISCORD.md) | Creating the Discord application, connecting it, controls and troubleshooting |
+| [Discord sounds and instant replay](docs/LEGACY-CONTROLS.md) | Discord soundboard controls and an NVIDIA replay shortcut |
+| [Experimental legacy Android client](experimental/legacy-android/README.md) | GeckoView-based prototype for Android 4.1 and later |
 | [Development](docs/DEVELOPMENT.md) | Architecture, local demo, builds, tests, widget sources and isolated agent runs |
 | [Contributing](CONTRIBUTING.md) | Contribution scope, review expectations, privacy and required checks |
 | [Changelog](CHANGELOG.md) | Release history and unreleased changes |

@@ -666,6 +666,13 @@ app.MapGet("/api/discord", (DiscordMonitor dc, ConfigStore cfg) => Results.Json(
 app.MapGet("/api/discord/img", async (string kind, string id, string hash, DiscordMonitor dc, CancellationToken ct) =>
     await dc.ImageAsync(kind, id, hash, ct) is { } img
         ? Results.File(img.Data, img.Type, lastModified: null, entityTag: null, enableRangeProcessing: false) : Results.NotFound());
+app.MapGet("/api/discord/sounds", async (DiscordMonitor dc, CancellationToken ct) =>
+{
+    try { return Results.Ok(new { sounds = await dc.SoundsAsync(ct) }); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapPost("/api/discord/sound", async (string? id, string? guild, DiscordMonitor dc, CancellationToken ct) =>
+    await dc.PlaySoundAsync(id, guild, ct) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 app.MapPost("/api/discord/{action}", async (string action, string? channel, DiscordMonitor dc) =>
     await dc.ActAsync(action, channel) is { } error ? Results.BadRequest(new { error }) : Results.Ok(new { ok = true }));
 

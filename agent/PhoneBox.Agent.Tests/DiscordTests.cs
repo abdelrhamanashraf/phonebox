@@ -49,6 +49,23 @@ public sealed class DiscordTests : IDisposable
         Assert.Equal("Discord is not connected", error);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("123456789")]
+    public void Sound_requests_include_the_source_guild_including_discord_defaults(string guild)
+    {
+        var args = DiscordMonitor.SoundArgs(new DiscordSound("42", "Sound", guild, null, true));
+        Assert.Equal("42", args["sound_id"]!.GetValue<string>());
+        Assert.Equal(guild, args["guild_id"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Sound_playback_is_denied_when_widget_control_is_off()
+    {
+        var error = await Monitor(false).PlaySoundAsync("42", "0", CancellationToken.None);
+        Assert.Contains("turned off", error);
+    }
+
     [Fact]
     public async Task A_widget_on_a_disabled_page_does_not_allow_control()
     {

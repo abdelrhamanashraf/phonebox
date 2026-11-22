@@ -1,6 +1,7 @@
 import { $, API, D, curPage, pages, PANEL_HEADERS, LOCALE, Q_STYLE, api, bridge, cfg, color, cssVar, rulesPaused, toggleRulesPause, fillIcon, fmtDur, fmtHM, fmtMem, gotoPageRef, gpuMem, gpusOf, h, en, haptic, icon, openSheet, paceInfo, pad, pairedPcs, quotaProviders, r1, shortDur, shortGpu, store, switchPc, t, tick, toast, transport, emo, labelled, rich, tp, tpv, quotaText } from '../main.js';
 import { W } from '../registry.js';
 import { canKillAnywhere, dialEl, every } from './helpers.js';
+import { deckState, deckCommand } from './controls.js';
 
 // ---------------------------------------------------------------- phone & PC
 // Your own HTML / CSS / JavaScript in a sandboxed iframe (no access to the panel, the agent or the phone). It gets
@@ -134,7 +135,8 @@ W.obs = {
 W.discord = {
   needs: ['tick', 'fast'],
   create(box, { o, page }) {
-    let data = null, lastKey = '', busy = null;
+    let data = null, lastKey = '', busy = null, sounds = [], soundOpen = false, soundLoaded = false, soundAt = 0;
+    let discordSounds = [], discordSoundsOpen = false, discordSoundsState = '', soundGroup = null;
     const open = new Set(); // servers whose channels are unfolded
     // a round logo: the image once it has loaded, the first letter until then (and when there is no image)
     const ico = (src, name) => {
@@ -142,7 +144,11 @@ W.discord = {
       if (src) { const im = new Image(); im.alt = ''; im.onload = () => w.replaceChildren(im); im.src = src; }
       return w;
     };
-    const load = async () => { try { data = await api('/discord'); } catch (_) {} };
+    const loadSounds = async () => {
+      try { const deck = await deckState(); sounds = (deck.actions || []).filter(a => a.kind === 'sound'); soundLoaded = true; soundAt = Date.now(); }
+      catch (_) { soundLoaded = false; }
+    };
+    const load = async () => { try { data = await api('/discord'); } catch (_) {} if (soundOpen && Date.now() - soundAt > 10000) await loadSounds(); };
     const img = (kind, id, hash) => `${API}/discord/img?kind=${kind}&id=${encodeURIComponent(id)}&hash=${encodeURIComponent(hash)}`;
     const act = async (action, channel) => {
       if (busy) return; // one press at a time: a double tap must not toggle twice
@@ -162,7 +168,7 @@ W.discord = {
     const render = (force = false) => {
       const s0 = data?.snapshot;
       const quiet = s0?.members ? { ...data, snapshot: { ...s0, members: s0.members.map(({ speaking, ...m }) => m) } } : data;
-      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight]);
+      const key = JSON.stringify([quiet, busy, [...open], soundOpen, soundLoaded, sounds, discordSoundsOpen, discordSoundsState, discordSounds, soundGroup, box.clientHeight]);
       if (!force && key === lastKey) { ring(); return; }
       lastKey = key;
       rings.clear();
@@ -188,6 +194,78 @@ W.discord = {
           rings.set(m.id, chip);
           return chip;
         })));
+      }
+      if (ctl) {
+        const toggle = h('button', 'deck-button', 'Discord sounds ' + (discordSoundsOpen ? '▴' : '▾'));
+        toggle.type = 'button';
+        toggle.onclick = async () => {
+          haptic(); discordSoundsOpen = !discordSoundsOpen;
+          if (discordSoundsOpen) {
+            discordSoundsState = 'Loading sounds…'; render(true);
+            try { const result = await api('/discord/sounds', 'GET', 10000); discordSounds = result.sounds || []; discordSoundsState = discordSounds.length ? '' : 'No sounds available.'; }
+            catch (_) { discordSoundsState = 'Discord sounds are unavailable. Check that the desktop agent is updated.'; }
+          }
+          render(true);
+        };
+        const section = h('div', 'dc-sound-section' + (discordSoundsOpen ? ' expanded' : ''), toggle);
+        if (discordSoundsOpen) {
+          if (discordSoundsState) section.append(h('div', 'deck-empty', discordSoundsState));
+          else {
+            const groups = new Map();
+            for (const sound of discordSounds) { const id = sound.guildId || '0'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(sound); }
+            if (!groups.has(soundGroup)) {
+              const currentGuild = s.channels.find(c => c.id === s.channelId)?.guildId;
+              soundGroup = groups.has(currentGuild) ? currentGuild : (groups.has('0') ? '0' : groups.keys().next().value);
+            }
+            const choices = h('div', 'dc-sound-groups'); choices.setAttribute('aria-label', 'Soundboard servers');
+            const ordered = [...groups.keys()].sort((a, b) => a === soundGroup ? -1 : b === soundGroup ? 1 : a === '0' ? -1 : b === '0' ? 1 : 0);
+            for (const id of ordered) {
+              const channel = s.channels.find(c => c.guildId === id);
+              const choice = h('button', 'deck-button' + (id === soundGroup ? ' selected' : ''), id === '0' ? 'Discord defaults' : (channel?.guild || 'Server ' + id));
+              choice.type = 'button'; choice.setAttribute('aria-pressed', String(id === soundGroup));
+              choice.onclick = () => { haptic(); soundGroup = id; render(true); };
+              choices.append(choice);
+            }
+            const grid = h('div', 'deck-actions');
+            for (const sound of groups.get(soundGroup) || []) {
+              const b = h('button', 'deck-button', (sound.emoji ? sound.emoji + ' ' : '') + sound.name);
+              b.type = 'button'; b.disabled = !sound.available || !s.channelId;
+              b.onclick = async () => {
+                haptic(); b.disabled = true;
+                try {
+                  const q = '?id=' + encodeURIComponent(sound.id) + '&guild=' + encodeURIComponent(sound.guildId || '0');
+                  const response = await fetch(API + '/discord/sound' + q, { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS });
+                  if (!response.ok) { const result = await response.json().catch(() => ({})); throw new Error(result.error || 'Discord could not play this sound'); }
+                } catch (e) { toast(e.message || 'Discord could not play this sound', 'err'); }
+                finally { b.disabled = !sound.available || !s.channelId; }
+              };
+              grid.append(b);
+            }
+            section.append(choices, grid);
+            if (!s.channelId) section.append(h('div', 'deck-empty', 'Join a voice channel to play sounds.'));
+          }
+        }
+        kids.push(section);
+      }
+      if (ctl) {
+        const toggle = h('button', 'deck-button', 'Soundboard ' + (soundOpen ? '▴' : '▾'));
+        toggle.type = 'button';
+        toggle.onclick = async () => { haptic(); soundOpen = !soundOpen; render(true); if (soundOpen) { await loadSounds(); render(); } };
+        const section = h('div', 'dc-sound-section' + (soundOpen ? ' expanded' : ''), toggle);
+        if (soundOpen) {
+          if (!soundLoaded) section.append(h('div', 'deck-empty', 'Loading soundboard…'));
+          else if (!sounds.length) section.append(h('div', 'deck-empty', 'Add sound controls in PhoneBox desktop settings.'));
+          else section.append(h('div', 'deck-actions', ...sounds.map(item => {
+            const play = h('button', 'deck-button', item.name);
+            const stop = h('button', 'deck-button', 'Stop');
+            play.type = stop.type = 'button'; play.disabled = item.available === false;
+            stop.setAttribute('aria-label', 'Stop ' + item.name);
+            const run = async op => { haptic(); play.disabled = stop.disabled = true; try { await deckCommand('action', { id: item.id, op }); } catch (e) { toast(e.message || 'Sound control failed', 'err'); } finally { play.disabled = item.available === false; stop.disabled = false; } };
+            play.onclick = () => run(''); stop.onclick = () => run('stop');
+            return h('div', 'deck-task', play, stop);
+          })));
+        }
+        kids.push(section);
       }
       if (o.channels !== false && s.channels.length) {
         // one block per server; tap it to unfold its voice channels (the server you are in starts unfolded)

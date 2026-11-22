@@ -9,6 +9,7 @@ namespace PhoneBox.Agent;
 
 public sealed record DiscordMember(string Id, string Name, bool Muted, bool Deafened, string? Avatar, bool Speaking = false);
 public sealed record DiscordChannel(string Id, string Name, string? Guild, string? GuildId, string? GuildIcon);
+public sealed record DiscordSound(string Id, string Name, string? GuildId, string? Emoji, bool Available);
 public sealed record DiscordNotification(long Ts, string Title, string Body);
 public sealed record DiscordSnapshot(bool Connected, string? Error, string? User, bool Muted, bool Deafened,
     string? ChannelId, string? ChannelName, string? ChannelKind, IReadOnlyList<DiscordMember> Members,
@@ -514,6 +515,45 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     }
 
     internal int VoiceRevision => Volatile.Read(ref _voiceRev);
+
+    // These RPC commands are supported by Discord's desktop client but are absent from its public RPC reference.
+    // Ask on demand, rather than polling the entire library every two seconds.
+    public async Task<IReadOnlyList<DiscordSound>> SoundsAsync(CancellationToken ct)
+    {
+        if (!ControlAllowed(config.Get()) || !_snap.Connected) throw new InvalidOperationException("Discord control is unavailable");
+        var result = await Request("GET_SOUNDBOARD_SOUNDS", null, null, ct);
+        if (result is not JsonArray array) throw new InvalidOperationException("Discord did not return a sound list");
+        return array.OfType<JsonObject>().Select(s => new DiscordSound(
+            JsonStr(s["sound_id"]) ?? "", JsonStr(s["name"]) ?? "Sound", JsonStr(s["guild_id"]),
+            JsonStr(s["emoji_name"]), s["available"]?.GetValue<bool>() != false))
+            .Where(s => s.Id.Length > 0 && s.Id.Length <= 20 && s.Id.All(char.IsAsciiDigit)).Take(1000).ToArray();
+    }
+
+    public async Task<string?> PlaySoundAsync(string? id, string? guild, CancellationToken ct)
+    {
+        if (!ControlAllowed(config.Get())) return "Discord control is turned off";
+        await _act.WaitAsync(ct);
+        try
+        {
+            if (!ControlAllowed(config.Get()) || !_snap.Connected) return "Discord control is unavailable";
+            if (string.IsNullOrEmpty(_snap.ChannelId)) return "Join a Discord voice channel first";
+            var sounds = await SoundsAsync(ct);
+            var sound = sounds.FirstOrDefault(s => s.Id == id && (s.GuildId ?? "0") == (guild ?? "0") && s.Available);
+            if (sound is null) return "That sound is no longer available";
+            await Request("PLAY_SOUNDBOARD_SOUND", SoundArgs(sound), null, ct);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return ex.Message; }
+        finally { _act.Release(); }
+    }
+
+    // Discord uses guild_id "0" for its default sounds and requires it in this RPC request.
+    internal static JsonObject SoundArgs(DiscordSound sound)
+    {
+        var args = new JsonObject { ["sound_id"] = sound.Id };
+        if (!string.IsNullOrEmpty(sound.GuildId)) args["guild_id"] = sound.GuildId;
+        return args;
+    }
 
     /// <summary>The widget's buttons: mute, deafen, leave, join (a voice channel id from the list the agent already sent).</summary>
     public async Task<string?> ActAsync(string action, string? channel)

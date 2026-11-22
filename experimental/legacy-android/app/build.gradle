@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'local.phonebox.geckotest'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig { applicationId 'local.phonebox.geckotest'; minSdk 16; targetSdk 28 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+}
+dependencies {
+    implementation('org.mozilla.geckoview:geckoview-armeabi-v7a:118.0.20231009140911') { exclude module: 'snakeyaml' }
+    implementation 'org.yaml:snakeyaml:1.26:android'
+}

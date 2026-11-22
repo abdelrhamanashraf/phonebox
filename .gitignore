@@ -11,6 +11,11 @@ android/app/build/
 android/local.properties
 android/.idea/
 android/.kotlin/
+experimental/legacy-android/.gradle/
+experimental/legacy-android/build/
+experimental/legacy-android/app/build/
+experimental/legacy-android/local.properties
+__pycache__/
 *.iml
 
 # Signing keys never belong in the repo
